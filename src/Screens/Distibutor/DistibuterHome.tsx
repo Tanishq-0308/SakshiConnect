@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,34 +7,56 @@ import {
   ScrollView,
   Alert,
   StatusBar,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { useOrders, Order } from '../../context/OrderContext';
-import { useInventory } from '../../context/InventoryContext';
-import CreateOrderForm from '../../components/CreateOrderForm';
+import { getOrders, acceptOrder, dispatchOrder, deliverOrder, Order } from '../../api/client';
 
-// Other screens (replace with real ones)
+// Other screens
 import ManageOrder from './ManageOrder';
 import CampaignScreen from './CampaignScreen';
 import AnalyticsScreen from './AnalyticsScreen';
 import DistProfileScreen from './DistProfileScreen';
 
-const DistributorBottomTabs = () => {
+const DistributorBottomTabs = ({ distributorId = 1 }) => {
   const [activeTab, setActiveTab] = useState('Orders');
   const [selectedTab, setSelectedTab] = useState<'Requests' | 'Pending' | 'Dispatch' | 'Delivered'>('Requests');
   
-  const { getOrdersByStatus, updateOrderStatus, updateOrderDetails } = useOrders();
-  const { reduceInventory, addToUserStock } = useInventory();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [processingOrderId, setProcessingOrderId] = useState<string | null>(null);
 
-  // Form modal state
-  const [showForm, setShowForm] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const loadOrders = async () => {
+    try {
+      setLoading(true);
+      const data = await getOrders(String(distributorId));
+      setOrders(data);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to load orders');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadOrders();
+    setRefreshing(false);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'Orders') {
+      loadOrders();
+    }
+  }, [activeTab]);
 
   const getStatusFromTab = () => {
     switch (selectedTab) {
       case 'Requests':
-        return 'placed';
+        return 'pending';
       case 'Pending':
         return 'accepted';
       case 'Dispatch':
@@ -42,85 +64,154 @@ const DistributorBottomTabs = () => {
       case 'Delivered':
         return 'delivered';
       default:
-        return 'placed';
+        return 'pending';
     }
   };
 
-  const orders = getOrdersByStatus(getStatusFromTab());
+  const filteredOrders = orders.filter(order => order.status === getStatusFromTab());
 
-  const handleAcceptOrder = (order: any) => {
-    setSelectedOrder(order);
-    setShowForm(true);
-  };
-
-  const handleFormSubmit = (orderDetails: {
-    orderer_name: string;
-    product_name: string;
-    quantity: number;
-    price_per_unit: number;
-    total_price: number;
-  }) => {
-    if (selectedOrder) {
-      // Update order with details and move to accepted status
-      updateOrderDetails(selectedOrder.id, orderDetails);
-      updateOrderStatus(selectedOrder.id, 'accepted');
-      
-      Alert.alert(
-        'Success',
-        `Order #${selectedOrder.id} has been accepted and moved to Pending!`
-      );
-    }
-    setShowForm(false);
-    setSelectedOrder(null);
-  };
-
-  const handleDispatchOrder = (orderId: number) => {
-    updateOrderStatus(orderId, 'dispatched');
-    Alert.alert('Success', `Order #${orderId} has been dispatched!`);
-  };
-
-  const handleDeliverOrder = (orderId: number) => {
-    const order = orders.find(o => o.id === orderId);
-    if (!order) return;
-
-    // Reduce inventory if product_id exists
-    if (order.product_id) {
-      reduceInventory(order.product_id, order.quantity);
-    }
-
-    // Add to user stock
-    addToUserStock({
-      product_name: order.product_name,
-      quantity: order.quantity,
-      distributor_name: order.distributor_name,
-      order_id: order.id,
-    });
-
-    // Update order status to delivered
-    updateOrderStatus(orderId, 'delivered');
-
+  const handleAcceptOrder = async (orderId: string) => {
     Alert.alert(
-      'Success',
-      `Order #${orderId} delivered!\n\nInventory reduced by ${order.quantity} units.\nAdded to user's stock.`
-    );
-  };
-
-  const handleRejectOrder = (orderId: number) => {
-    Alert.alert(
-      'Reject Order',
-      `Are you sure you want to reject Order #${orderId}?`,
+      'Accept Order',
+      'Are you sure you want to accept this order?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Reject',
-          style: 'destructive',
-          onPress: () => {
-            // Remove order by updating to a rejected status or filter it out
-            Alert.alert('Rejected', `Order #${orderId} has been rejected.`);
+          text: 'Accept',
+          onPress: async () => {
+            try {
+              setProcessingOrderId(orderId);
+              await acceptOrder(orderId);
+              Alert.alert('Success', 'Order accepted successfully!');
+              await loadOrders();
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Failed to accept order');
+            } finally {
+              setProcessingOrderId(null);
+            }
           },
         },
       ]
     );
+  };
+
+  const handleDispatchOrder = async (orderId: string) => {
+    Alert.alert(
+      'Dispatch Order',
+      'Mark this order as dispatched?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Dispatch',
+          onPress: async () => {
+            try {
+              setProcessingOrderId(orderId);
+              await dispatchOrder(orderId);
+              Alert.alert('Success', 'Order dispatched successfully!');
+              await loadOrders();
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Failed to dispatch order');
+            } finally {
+              setProcessingOrderId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDeliverOrder = async (orderId: string, productName: string, quantity: number) => {
+    Alert.alert(
+      'Deliver Order',
+      `Confirm delivery?\n\n⚠️ This will:\n• Deduct ${quantity} units from your inventory\n• Add ${quantity} units to user's stock\n• Mark order as delivered`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Confirm Delivery',
+          style: 'default',
+          onPress: async () => {
+            try {
+              setProcessingOrderId(orderId);
+              await deliverOrder(orderId);
+              Alert.alert(
+                'Success',
+                `Order delivered!\n\nStock transferred:\n• Your inventory: -${quantity} ${productName}\n• User stock: +${quantity} ${productName}`,
+                [{ text: 'OK', onPress: () => loadOrders() }]
+              );
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Failed to deliver order');
+            } finally {
+              setProcessingOrderId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const getStatusStyle = (status: string) => {
+    switch (status) {
+      case 'pending':
+        return { backgroundColor: '#FEF3C7' };
+      case 'accepted':
+        return { backgroundColor: '#DBEAFE' };
+      case 'dispatched':
+        return { backgroundColor: '#E0E7FF' };
+      case 'delivered':
+        return { backgroundColor: '#D1FAE5' };
+      default:
+        return { backgroundColor: '#F3F4F6' };
+    }
+  };
+
+  const renderActionButton = (order: Order) => {
+    const isProcessing = processingOrderId === order.order_id;
+
+    if (isProcessing) {
+      return (
+        <View style={styles.actionButton}>
+          <ActivityIndicator color="#FFF" />
+        </View>
+      );
+    }
+
+    switch (order.status) {
+      case 'pending':
+        return (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.acceptButton]}
+            onPress={() => handleAcceptOrder(order.order_id)}>
+            <Ionicons name="checkmark-circle" size={18} color="#fff" />
+            <Text style={styles.buttonText}>Accept Order</Text>
+          </TouchableOpacity>
+        );
+      case 'accepted':
+        return (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.dispatchButton]}
+            onPress={() => handleDispatchOrder(order.order_id)}>
+            <Ionicons name="send" size={18} color="#fff" />
+            <Text style={styles.buttonText}>Mark as Dispatched</Text>
+          </TouchableOpacity>
+        );
+      case 'dispatched':
+        return (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.deliverButton]}
+            onPress={() => handleDeliverOrder(order.order_id, order.product_name, order.quantity)}>
+            <Ionicons name="checkmark-done" size={18} color="#fff" />
+            <Text style={styles.buttonText}>Mark as Delivered</Text>
+          </TouchableOpacity>
+        );
+      case 'delivered':
+        return (
+          <View style={[styles.actionButton, styles.completedButton]}>
+            <Text style={styles.buttonText}>✓ Completed</Text>
+          </View>
+        );
+      default:
+        return null;
+    }
   };
 
   const renderOrders = () => (
@@ -149,145 +240,88 @@ const DistributorBottomTabs = () => {
       </View>
 
       {/* Orders List */}
-      <ScrollView style={styles.content}>
-        {orders.length === 0 ? (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="cube-outline" size={60} color="#CCC" />
-            <Text style={styles.emptyText}>No Orders Found</Text>
-            <Text style={styles.emptySubtext}>
-              {selectedTab === 'Requests'
-                ? 'New order requests will appear here'
-                : selectedTab === 'Pending'
-                ? 'Accepted orders being prepared'
-                : selectedTab === 'Dispatch'
-                ? 'Dispatched orders on the way'
-                : 'Completed deliveries will appear here'}
-            </Text>
-          </View>
-        ) : (
-          orders.map((order) => (
-            <View key={order.id} style={styles.orderCard}>
-              <View style={styles.orderHeader}>
-                <View>
-                  <Text style={styles.orderTitle}>
-                    Order #{order.id}
-                  </Text>
-                  <Text style={styles.ordererName}>{order.orderer_name}</Text>
-                </View>
-                <View style={[styles.statusBadge, getStatusStyle(order.status)]}>
-                  <Text style={styles.statusText}>
-                    {order.status.toUpperCase()}
-                  </Text>
-                </View>
-              </View>
-
-              {order.product_name && order.quantity > 0 ? (
-                <>
-                  <Text style={styles.orderDetail}>
-                    Product: <Text style={styles.bold}>{order.product_name}</Text>
-                  </Text>
-                  <Text style={styles.orderDetail}>
-                    Quantity: <Text style={styles.bold}>{order.quantity} packs</Text>
-                  </Text>
-                  <Text style={styles.orderDetail}>
-                    Price: <Text style={styles.bold}>₹{order.price_per_unit} / pack</Text>
-                  </Text>
-                  <Text style={styles.orderDetail}>
-                    Total: <Text style={styles.bold}>₹{order.total_price?.toLocaleString()}</Text>
-                  </Text>
-                </>
-              ) : (
-                <View style={styles.pendingDetails}>
-                  <Ionicons name="information-circle-outline" size={18} color="#F59E0B" />
-                  <Text style={styles.pendingText}>
-                    Awaiting order details
-                  </Text>
-                </View>
-              )}
-
-              <Text style={styles.orderDetail}>
-                Type: {order.orderer_type}
+      {loading && !refreshing ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#00E676" />
+          <Text style={styles.loadingText}>Loading orders...</Text>
+        </View>
+      ) : (
+        <ScrollView 
+          style={styles.content}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }>
+          {filteredOrders.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="cube-outline" size={60} color="#CCC" />
+              <Text style={styles.emptyText}>No Orders Found</Text>
+              <Text style={styles.emptySubtext}>
+                {selectedTab === 'Requests'
+                  ? 'New order requests will appear here'
+                  : selectedTab === 'Pending'
+                  ? 'Accepted orders being prepared'
+                  : selectedTab === 'Dispatch'
+                  ? 'Dispatched orders on the way'
+                  : 'Completed deliveries will appear here'}
               </Text>
-              <Text style={styles.orderDetail}>
-                Date: {new Date(order.created_at).toLocaleString()}
-              </Text>
-
-              {/* Action Buttons */}
-              <View style={styles.buttonRow}>
-                {order.status === 'placed' && (
-                  <>
-                    <TouchableOpacity
-                      style={styles.acceptButton}
-                      onPress={() => handleAcceptOrder(order)}>
-                      <Ionicons name="checkmark-circle" size={18} color="#fff" />
-                      <Text style={styles.buttonText}>Accept</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={styles.rejectButton}
-                      onPress={() => handleRejectOrder(order.id)}>
-                      <Ionicons name="close-circle" size={18} color="#B71C1C" />
-                      <Text style={styles.buttonTextReject}>Reject</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
-
-                {order.status === 'accepted' && (
-                  <TouchableOpacity
-                    style={styles.dispatchButton}
-                    onPress={() => handleDispatchOrder(order.id)}>
-                    <Ionicons name="send" size={18} color="#fff" />
-                    <Text style={styles.buttonText}>Mark as Dispatched</Text>
-                  </TouchableOpacity>
-                )}
-
-                {order.status === 'dispatched' && (
-                  <TouchableOpacity
-                    style={styles.deliverButton}
-                    onPress={() => handleDeliverOrder(order.id)}>
-                    <Ionicons name="checkmark-done" size={18} color="#fff" />
-                    <Text style={styles.buttonText}>Mark as Delivered</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
             </View>
-          ))
-        )}
-      </ScrollView>
+          ) : (
+            filteredOrders.map((order) => (
+              <View key={order.id} style={styles.orderCard}>
+                <View style={styles.orderHeader}>
+                  <View>
+                    <Text style={styles.orderTitle}>
+                      Order #{order.order_id}
+                    </Text>
+                    <Text style={styles.ordererName}>{order.user_id}</Text>
+                  </View>
+                  <View style={[styles.statusBadge, getStatusStyle(order.status)]}>
+                    <Text style={styles.statusText}>
+                      {order.status.toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
 
-      {/* Create Order Form Modal */}
-      <CreateOrderForm
-        visible={showForm}
-        onClose={() => {
-          setShowForm(false);
-          setSelectedOrder(null);
-        }}
-        onSubmit={handleFormSubmit}
-        ordererName={selectedOrder?.orderer_name || 'Customer'}
-      />
+                <Text style={styles.orderDetail}>
+                  Product: <Text style={styles.bold}>{order.product_name}</Text>
+                </Text>
+                <Text style={styles.orderDetail}>
+                  Quantity: <Text style={styles.bold}>{order.quantity} units</Text>
+                </Text>
+                <Text style={styles.orderDetail}>
+                  Price: <Text style={styles.bold}>₹{order.price} / unit</Text>
+                </Text>
+                <Text style={styles.orderDetail}>
+                  Total: <Text style={styles.bold}>₹{order.total_amount?.toLocaleString()}</Text>
+                </Text>
+                <Text style={styles.orderDetail}>
+                  Payment: {order.payment_mode}
+                </Text>
+                <Text style={styles.orderDetail}>
+                  Address: {order.delivery_address}
+                </Text>
+                <Text style={styles.orderDetail}>
+                  Date: {new Date(order.created_at).toLocaleString()}
+                </Text>
+
+                {/* Action Button */}
+                <View style={styles.buttonRow}>
+                  {renderActionButton(order)}
+                </View>
+              </View>
+            ))
+          )}
+        </ScrollView>
+      )}
     </View>
   );
-
-  const getStatusStyle = (status: string) => {
-    switch (status) {
-      case 'placed':
-        return { backgroundColor: '#FEF3C7' };
-      case 'accepted':
-        return { backgroundColor: '#DBEAFE' };
-      case 'dispatched':
-        return { backgroundColor: '#E0E7FF' };
-      case 'delivered':
-        return { backgroundColor: '#D1FAE5' };
-      default:
-        return { backgroundColor: '#F3F4F6' };
-    }
-  };
 
   const renderScreen = () => {
     switch (activeTab) {
       case 'Orders':
         return renderOrders();
       case 'Inventory':
-        return <ManageOrder />;
+        return <ManageOrder distributorId={distributorId} />;
       case 'Campaign':
         return <CampaignScreen />;
       case 'Analytics':
@@ -352,6 +386,17 @@ const styles = StyleSheet.create({
   tabText: { color: '#333', fontWeight: '500' },
   tabTextActive: { color: '#000', fontWeight: '700' },
   content: { padding: 16, flex: 1 },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 80,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666',
+  },
   emptyContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -413,68 +458,30 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   bold: { fontWeight: '600', color: '#000' },
-  pendingDetails: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FEF3C7',
-    padding: 10,
-    borderRadius: 8,
-    marginVertical: 8,
-    gap: 8,
-  },
-  pendingText: {
-    fontSize: 13,
-    color: '#92400E',
-    fontWeight: '500',
-  },
   buttonRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     marginTop: 14,
-    gap: 8,
+  },
+  actionButton: {
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
   },
   acceptButton: {
-    flex: 1,
     backgroundColor: '#00E676',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
   },
   dispatchButton: {
-    flex: 1,
     backgroundColor: '#3B82F6',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
   },
   deliverButton: {
-    flex: 1,
     backgroundColor: '#10B981',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
   },
-  rejectButton: {
-    flex: 1,
-    backgroundColor: '#FFCDD2',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
+  completedButton: {
+    backgroundColor: '#666',
   },
   buttonText: { color: '#FFF', fontWeight: '700', fontSize: 14 },
-  buttonTextReject: { color: '#B71C1C', fontWeight: '700', fontSize: 14 },
   bottomNav: {
     flexDirection: 'row',
     backgroundColor: '#FFF',

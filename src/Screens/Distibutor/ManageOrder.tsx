@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,9 +6,12 @@ import {
   TouchableOpacity,
   Switch,
   ScrollView,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { useInventory } from '../../context/InventoryContext';
+import { getInventory, updateProduct, Product } from '../../api/client';
 import AddProductModal from '../../components/Modals/AddProductModal';
 import EditProductModal from '../../components/Modals/EditProductModal';
 
@@ -23,22 +26,54 @@ const ManageOrder: React.FC<ManageOrderProps> = ({
   distributorName = 'My Store',
   distributorPhone = '+91XXXXXXXXXX',
 }) => {
-  const { getProductsByDistributor, updateProduct } = useInventory();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
 
-  const products = getProductsByDistributor(distributorId);
-
-  const handleToggleOffer = (productId: number, value: boolean) => {
-    updateProduct(productId, { show_in_offers: value });
+  const loadProducts = async () => {
+    try {
+      setLoading(true);
+      const data = await getInventory(String(distributorId));
+      setProducts(data);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to load inventory');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleQuantityChange = (productId: number, increment: boolean) => {
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadProducts();
+    setRefreshing(false);
+  }, []);
+
+  useEffect(() => {
+    loadProducts();
+  }, []);
+
+  const handleToggleOffer = async (productId: number, value: boolean) => {
+    try {
+      await updateProduct(productId, { is_enabled: value });
+      await loadProducts();
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to update product');
+    }
+  };
+
+  const handleQuantityChange = async (productId: number, increment: boolean) => {
     const product = products.find((p) => p.id === productId);
     if (product) {
-      const newQuantity = increment ? product.quantity + 1 : Math.max(0, product.quantity - 1);
-      updateProduct(productId, { quantity: newQuantity });
+      const newQuantity = increment ? product.stock_quantity + 1 : Math.max(0, product.stock_quantity - 1);
+      try {
+        await updateProduct(productId, { stock_quantity: newQuantity });
+        await loadProducts();
+      } catch (error: any) {
+        Alert.alert('Error', error.message || 'Failed to update quantity');
+      }
     }
   };
 
@@ -47,8 +82,21 @@ const ManageOrder: React.FC<ManageOrderProps> = ({
     setIsEditModalVisible(true);
   };
 
+  if (loading && !refreshing) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2563EB" />
+        <Text style={styles.loadingText}>Loading inventory...</Text>
+      </View>
+    );
+  }
+
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <ScrollView 
+      contentContainerStyle={styles.container}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+      }>
       {/* Header */}
       <View style={styles.headerRow}>
         <Text style={styles.header}>Inventory</Text>
@@ -61,24 +109,6 @@ const ManageOrder: React.FC<ManageOrderProps> = ({
           </TouchableOpacity>
         </View>
       </View>
-
-      {/* Offline notice */}
-      {/* <View style={styles.offlineCard}>
-        <Ionicons name="wifi-outline" size={20} color="#FF8C00" />
-        <View style={{ marginLeft: 8, flex: 1 }}>
-          <Text style={styles.offlineText}>Offline</Text>
-          <Text style={styles.offlineSub}>
-            Changes will sync when you're back online.
-          </Text>
-        </View>
-        <TouchableOpacity style={styles.dismissButton}>
-          <Text style={styles.dismissText}>Dismiss</Text>
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.infoText}>
-        Items shown in 'Offers' only if visible and in stock.
-      </Text> */}
 
       {/* Products List */}
       {products.length === 0 ? (
@@ -99,8 +129,8 @@ const ManageOrder: React.FC<ManageOrderProps> = ({
             <View style={styles.rowBetween}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.productName}>{item.product_name}</Text>
-                {item.description && (
-                  <Text style={styles.description}>{item.description}</Text>
+                {item.category && (
+                  <Text style={styles.description}>{item.category}</Text>
                 )}
               </View>
               <View
@@ -108,23 +138,23 @@ const ManageOrder: React.FC<ManageOrderProps> = ({
                   styles.stockTag,
                   {
                     backgroundColor:
-                      item.quantity > 0 ? '#D1FADF' : '#FEE2E2',
+                      item.stock_quantity > 0 ? '#D1FADF' : '#FEE2E2',
                   },
                 ]}>
                 <Text
                   style={[
                     styles.stockText,
-                    { color: item.quantity > 0 ? '#047857' : '#DC2626' },
+                    { color: item.stock_quantity > 0 ? '#047857' : '#DC2626' },
                   ]}>
-                  {item.quantity > 0 ? 'In Stock' : 'Out of Stock'}
+                  {item.stock_quantity > 0 ? 'In Stock' : 'Out of Stock'}
                 </Text>
               </View>
             </View>
 
-            <Text style={styles.details}>Price: ₹{item.unit_price}/pack</Text>
-            <Text style={styles.details}>Quantity: {item.quantity} units</Text>
+            <Text style={styles.details}>Price: ₹{item.price}/pack</Text>
+            <Text style={styles.details}>Quantity: {item.stock_quantity} units</Text>
             <Text style={styles.details}>MOQ: {item.moq} packs</Text>
-            <Text style={styles.details}>Lead time: {item.lead_time}</Text>
+            <Text style={styles.details}>Lead time: {item.lead_time || 'N/A'}</Text>
 
             {/* Quantity Controls */}
             <View style={styles.qtyRow}>
@@ -133,7 +163,7 @@ const ManageOrder: React.FC<ManageOrderProps> = ({
                 onPress={() => handleQuantityChange(item.id, false)}>
                 <Text style={styles.qtyButtonText}>–</Text>
               </TouchableOpacity>
-              <Text style={styles.qtyValue}>{item.quantity}</Text>
+              <Text style={styles.qtyValue}>{item.stock_quantity}</Text>
               <TouchableOpacity
                 style={styles.qtyButton}
                 onPress={() => handleQuantityChange(item.id, true)}>
@@ -148,7 +178,7 @@ const ManageOrder: React.FC<ManageOrderProps> = ({
             <View style={styles.toggleRow}>
               <Text style={styles.toggleLabel}>Show in offers</Text>
               <Switch
-                value={item.show_in_offers}
+                value={item.is_enabled}
                 onValueChange={(value) => handleToggleOffer(item.id, value)}
               />
             </View>
@@ -189,6 +219,7 @@ const ManageOrder: React.FC<ManageOrderProps> = ({
         distributorId={distributorId}
         distributorName={distributorName}
         distributorPhone={distributorPhone}
+        onSuccess={loadProducts}
       />
 
       {/* Edit Product Modal */}
@@ -199,6 +230,7 @@ const ManageOrder: React.FC<ManageOrderProps> = ({
           setSelectedProduct(null);
         }}
         product={selectedProduct}
+        onSuccess={loadProducts}
       />
     </ScrollView>
   );
@@ -208,6 +240,17 @@ export default ManageOrder;
 
 const styles = StyleSheet.create({
   container: { flexGrow: 1, backgroundColor: '#F9FAFB', padding: 16 },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666',
+  },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -224,23 +267,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
-  offlineCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF5E6',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 10,
-  },
-  offlineText: { fontWeight: '600', color: '#111' },
-  offlineSub: { fontSize: 12, color: '#555' },
-  dismissButton: {
-    backgroundColor: '#E5E7EB',
-    padding: 6,
-    borderRadius: 6,
-  },
-  dismissText: { fontSize: 12, color: '#000' },
-  infoText: { color: '#6B7280', marginVertical: 8, fontSize: 13 },
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',

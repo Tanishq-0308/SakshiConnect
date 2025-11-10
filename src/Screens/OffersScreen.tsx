@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,78 +6,95 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { useOrders } from '../context/OrderContext';
-import { useInventory } from '../context/InventoryContext';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-const OffersScreen: React.FC = () => {
+import { getInventory, createOrder, Product } from '../api/client';
+
+const OffersScreen: React.FC<{ userId?: string }> = ({ userId = 'USER001' }) => {
   const navigation = useNavigation();
-  const { addOrder, makeCall } = useOrders();
-  const { getAvailableProducts } = useInventory();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const availableProducts = getAvailableProducts();
-
-  const handleCall = (product: any) => {
-    // Create a request order with product details
-    addOrder({
-      orderer_name: 'User Request',
-      orderer_type: 'Customer',
-      product_name: product.product_name,
-      product_id: product.id,
-      quantity: 0, // Will be filled by distributor
-      price_per_unit: product.unit_price,
-      total_price: 0,
-      distributor_name: product.distributor_name,
-      distributor_phone: product.distributor_phone,
-    });
-
-    // Show confirmation
-    Alert.alert(
-      'Request Sent',
-      `Your call request for ${product.product_name} has been sent to ${product.distributor_name}. They will see it in their Orders tab.`,
-      [{ text: 'OK' }]
-    );
-
-    // Open dialer
-    makeCall(product.distributor_phone, product.distributor_name);
+  const loadProducts = async () => {
+    try {
+      setLoading(true);
+      // Get only enabled products with stock
+      const data = await getInventory(undefined, true);
+      setProducts(data);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to load products');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleWhatsApp = (product: any) => {
-    // Create a request order
-    addOrder({
-      orderer_name: 'User Request',
-      orderer_type: 'Customer',
-      product_name: product.product_name,
-      product_id: product.id,
-      quantity: 0,
-      price_per_unit: product.unit_price,
-      total_price: 0,
-      distributor_name: product.distributor_name,
-      distributor_phone: product.distributor_phone,
-    });
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadProducts();
+    setRefreshing(false);
+  }, []);
 
+  useEffect(() => {
+    loadProducts();
+  }, []);
+
+  const handlePlaceOrder = async (product: Product) => {
     Alert.alert(
-      'Request Sent',
-      `Your WhatsApp request for ${product.product_name} has been sent to ${product.distributor_name}. They will see it in their Orders tab.`,
-      [{ text: 'OK' }]
+      'Place Order',
+      `Order ${product.product_name}?\n\nPrice: ₹${product.price}\nMOQ: ${product.moq} units`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Place Order',
+          onPress: async () => {
+            try {
+              const order = await createOrder({
+                user_id: userId,
+                distributor_id: product.distributor_id,
+                product_id: product.id,
+                product_name: product.product_name,
+                quantity: product.moq,
+                price: product.price,
+                payment_mode: product.payment_modes[0] || 'COD',
+                delivery_address: 'Default Address',
+              });
+
+              Alert.alert(
+                'Success',
+                `Order placed successfully!\nOrder ID: ${order.order_id}\n\nThe distributor will see it in their Orders tab.`,
+                [{ text: 'OK', onPress: () => loadProducts() }]
+              );
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Failed to place order');
+            }
+          },
+        },
+      ]
     );
   };
+
+  if (loading && !refreshing) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#06B6D4" />
+        <Text style={styles.loadingText}>Loading products...</Text>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
-      <ScrollView style={styles.container}>
-        {/* Offline Banner */}
-        {/* <View style={styles.offlineBanner}>
-        <Ionicons name="warning-outline" size={20} color="#A16207" />
-        <Text style={styles.offlineText}>
-          You're offline. Calls/WhatsApp will be saved and shared when online.
-        </Text>
-      </View> */}
-
+      <ScrollView 
+        style={styles.container}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }>
         {/* Header */}
-
         <View style={styles.headerCard}>
           <View style={styles.headerRow}>
             <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -86,12 +103,11 @@ const OffersScreen: React.FC = () => {
             <Text style={styles.headerTitle}>Available Products</Text>
           </View>
           <Text style={styles.headerSubtitle}>
-            Call/WhatsApp to order. Distributor will enter it; see status in Orders.
+            Place orders directly. Track status in Orders tab.
           </Text>
         </View>
 
-
-        {availableProducts.length === 0 ? (
+        {products.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="cube-outline" size={60} color="#CCC" />
             <Text style={styles.emptyText}>No products available</Text>
@@ -100,39 +116,41 @@ const OffersScreen: React.FC = () => {
             </Text>
           </View>
         ) : (
-          availableProducts.map((product) => (
+          products.map((product) => (
             <View key={product.id} style={styles.card}>
               <View style={styles.cardHeader}>
                 <View>
                   <Text style={styles.productName}>{product.product_name}</Text>
-                  {product.description && (
-                    <Text style={styles.productDescription}>{product.description}</Text>
+                  {product.category && (
+                    <Text style={styles.productDescription}>{product.category}</Text>
                   )}
                 </View>
                 <View style={styles.stockBadge}>
                   <View style={styles.stockDot} />
-                  <Text style={styles.stockText}>{product.quantity} in stock</Text>
+                  <Text style={styles.stockText}>{product.stock_quantity} in stock</Text>
                 </View>
               </View>
 
-              <Text style={styles.distributorName}>{product.distributor_name}</Text>
+              <Text style={styles.distributorName}>Distributor: {product.distributor_id}</Text>
 
               <View style={styles.detailsRow}>
                 <View style={styles.detailItem}>
                   <Ionicons name="cash-outline" size={16} color="#6B7280" />
-                  <Text style={styles.detailText}>₹{product.unit_price}/pack</Text>
+                  <Text style={styles.detailText}>₹{product.price}/unit</Text>
                 </View>
                 <View style={styles.detailItem}>
                   <Ionicons name="cube-outline" size={16} color="#6B7280" />
-                  <Text style={styles.detailText}>MOQ: {product.moq} packs</Text>
+                  <Text style={styles.detailText}>MOQ: {product.moq} units</Text>
                 </View>
               </View>
 
               <View style={styles.detailsRow}>
-                <View style={styles.detailItem}>
-                  <Ionicons name="time-outline" size={16} color="#6B7280" />
-                  <Text style={styles.detailText}>Lead: {product.lead_time}</Text>
-                </View>
+                {product.lead_time && (
+                  <View style={styles.detailItem}>
+                    <Ionicons name="time-outline" size={16} color="#6B7280" />
+                    <Text style={styles.detailText}>Lead: {product.lead_time}</Text>
+                  </View>
+                )}
                 {product.service_areas.length > 0 && (
                   <View style={styles.detailItem}>
                     <Ionicons name="location-outline" size={16} color="#6B7280" />
@@ -153,30 +171,12 @@ const OffersScreen: React.FC = () => {
                 </View>
               )}
 
-              {product.seller_note && (
-                <View style={styles.noteCard}>
-                  <Ionicons name="information-circle-outline" size={16} color="#2563EB" />
-                  <Text style={styles.noteText}>{product.seller_note}</Text>
-                </View>
-              )}
-
               <TouchableOpacity
-                style={styles.callButton}
-                onPress={() => handleCall(product)}>
-                <Ionicons name="call-outline" size={18} color="#fff" />
-                <Text style={styles.buttonText}>Call distributor</Text>
+                style={styles.orderButton}
+                onPress={() => handlePlaceOrder(product)}>
+                <Ionicons name="cart-outline" size={18} color="#fff" />
+                <Text style={styles.buttonText}>Place Order</Text>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.whatsappButton}
-                onPress={() => handleWhatsApp(product)}>
-                <Ionicons name="logo-whatsapp" size={18} color="#0F766E" />
-                <Text style={styles.whatsappText}>WhatsApp distributor</Text>
-              </TouchableOpacity>
-
-              <Text style={styles.note}>
-                We'll note your request for the distributor.
-              </Text>
             </View>
           ))
         )}
@@ -193,19 +193,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9FAFB',
     padding: 12,
   },
-  offlineBanner: {
-    backgroundColor: '#FEF9C3',
-    borderRadius: 8,
-    padding: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  offlineText: {
-    color: '#713F12',
+  loadingContainer: {
     flex: 1,
-    fontSize: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666',
   },
   headerCard: {
     backgroundColor: '#fff',
@@ -230,7 +227,6 @@ const styles = StyleSheet.create({
     color: '#4B5563',
     lineHeight: 20,
   },
-
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -334,20 +330,7 @@ const styles = StyleSheet.create({
     color: '#374151',
     fontWeight: '500',
   },
-  noteCard: {
-    flexDirection: 'row',
-    backgroundColor: '#EFF6FF',
-    padding: 10,
-    borderRadius: 8,
-    gap: 8,
-    marginBottom: 12,
-  },
-  noteText: {
-    fontSize: 13,
-    color: '#1E40AF',
-    flex: 1,
-  },
-  callButton: {
+  orderButton: {
     backgroundColor: '#06B6D4',
     borderRadius: 10,
     paddingVertical: 10,
@@ -357,30 +340,9 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 12,
   },
-  whatsappButton: {
-    backgroundColor: '#ECFEFF',
-    borderRadius: 10,
-    paddingVertical: 10,
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: 8,
-  },
   buttonText: {
     color: '#fff',
     fontSize: 15,
     fontWeight: '600',
-  },
-  whatsappText: {
-    color: '#0F766E',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  note: {
-    textAlign: 'center',
-    color: '#6B7280',
-    fontSize: 13,
-    marginTop: 10,
   },
 });

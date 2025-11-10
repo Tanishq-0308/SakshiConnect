@@ -8,9 +8,11 @@ import {
   TextInput,
   ScrollView,
   Switch,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { useInventory } from '../../context/InventoryContext';
+import { addProductToInventory } from '../../api/client';
 
 interface AddProductModalProps {
   visible: boolean;
@@ -18,6 +20,7 @@ interface AddProductModalProps {
   distributorId?: number;
   distributorName?: string;
   distributorPhone?: string;
+  onSuccess?: () => void;
 }
 
 const AddProductModal: React.FC<AddProductModalProps> = ({
@@ -26,8 +29,9 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
   distributorId = 1,
   distributorName = 'Distributor',
   distributorPhone = '+91XXXXXXXXXX',
+  onSuccess,
 }) => {
-  const { addProduct } = useInventory();
+  const [loading, setLoading] = useState(false);
 
   // Form state
   const [productName, setProductName] = useState('Reusable Pads - 8 pack');
@@ -61,26 +65,45 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
     }
   };
 
-  const handleSaveProduct = () => {
-    addProduct({
-      product_name: productName,
-      description,
-      unit_price: price,
-      quantity: stockOnHand,
-      moq,
-      lead_time: leadTime,
-      service_areas: serviceAreas,
-      payment_modes: paymentModes,
-      seller_note: sellerNote,
-      show_in_offers: showInOffers,
-      distributor_id: distributorId,
-      distributor_name: distributorName,
-      distributor_phone: distributorPhone,
-    });
+  const handleSaveProduct = async () => {
+    if (!productName.trim()) {
+      Alert.alert('Error', 'Product name is required');
+      return;
+    }
+    if (price <= 0) {
+      Alert.alert('Error', 'Valid price is required');
+      return;
+    }
+    if (moq <= 0) {
+      Alert.alert('Error', 'Valid MOQ is required');
+      return;
+    }
 
-    // Reset form
-    resetForm();
-    onClose();
+    try {
+      setLoading(true);
+
+      await addProductToInventory({
+        distributor_id: String(distributorId),
+        product_name: productName.trim(),
+        category: description.trim() || undefined,
+        price: price,
+        moq: moq,
+        lead_time: leadTime.trim() || undefined,
+        service_areas: serviceAreas.filter(a => a.trim()),
+        payment_modes: paymentModes,
+        stock_quantity: stockOnHand,
+        is_enabled: showInOffers,
+      });
+
+      Alert.alert('Success', 'Product added successfully!');
+      resetForm();
+      onSuccess?.();
+      onClose();
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to add product');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resetForm = () => {
@@ -102,7 +125,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
         <View style={styles.modalContent}>
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Add Product</Text>
-            <TouchableOpacity onPress={onClose}>
+            <TouchableOpacity onPress={onClose} disabled={loading}>
               <Text style={styles.cancelButton}>Cancel</Text>
             </TouchableOpacity>
           </View>
@@ -115,7 +138,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.catalogueTitle}>Select from catalogue</Text>
-                <Text style={styles.catalogueSubtitle}>{productName}</Text>
+                <Text style={styles.catalogueSubtitle}>{productName || 'Enter product name'}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#999" />
             </TouchableOpacity>
@@ -130,13 +153,15 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
               <View style={styles.stockRow}>
                 <TouchableOpacity
                   style={styles.stockButton}
-                  onPress={() => setStockOnHand(Math.max(0, stockOnHand - 1))}>
+                  onPress={() => setStockOnHand(Math.max(0, stockOnHand - 1))}
+                  disabled={loading}>
                   <Text style={styles.stockButtonText}>−</Text>
                 </TouchableOpacity>
                 <Text style={styles.stockValue}>{stockOnHand}</Text>
                 <TouchableOpacity
                   style={[styles.stockButton, styles.stockButtonPlus]}
-                  onPress={() => setStockOnHand(stockOnHand + 1)}>
+                  onPress={() => setStockOnHand(stockOnHand + 1)}
+                  disabled={loading}>
                   <Text style={styles.stockButtonTextWhite}>+</Text>
                 </TouchableOpacity>
               </View>
@@ -146,22 +171,33 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Offer shown to outlets</Text>
 
-              <Text style={styles.inputLabel}>Price (₹/pack)</Text>
+              <Text style={styles.inputLabel}>Product Name *</Text>
+              <TextInput
+                style={styles.input}
+                value={productName}
+                onChangeText={setProductName}
+                placeholder="Enter product name"
+                editable={!loading}
+              />
+
+              <Text style={styles.inputLabel}>Price (₹/pack) *</Text>
               <TextInput
                 style={styles.input}
                 value={String(price)}
                 onChangeText={(text) => setPrice(Number(text) || 0)}
                 keyboardType="numeric"
                 placeholder="Enter price"
+                editable={!loading}
               />
 
-              <Text style={styles.inputLabel}>MOQ</Text>
+              <Text style={styles.inputLabel}>MOQ *</Text>
               <TextInput
                 style={styles.input}
                 value={String(moq)}
                 onChangeText={(text) => setMoq(Number(text) || 1)}
                 keyboardType="numeric"
                 placeholder="Minimum order quantity"
+                editable={!loading}
               />
 
               <Text style={styles.inputLabel}>Lead time</Text>
@@ -170,6 +206,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
                 value={leadTime}
                 onChangeText={setLeadTime}
                 placeholder="e.g., 2-4 days"
+                editable={!loading}
               />
 
               {/* Service areas */}
@@ -178,7 +215,7 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
                 {serviceAreas.map((area, idx) => (
                   <View key={idx} style={styles.chip}>
                     <Text style={styles.chipText}>{area}</Text>
-                    <TouchableOpacity onPress={() => handleRemoveArea(area)}>
+                    <TouchableOpacity onPress={() => handleRemoveArea(area)} disabled={loading}>
                       <Ionicons name="close" size={16} color="#2563EB" />
                     </TouchableOpacity>
                   </View>
@@ -190,8 +227,12 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
                   value={newArea}
                   onChangeText={setNewArea}
                   placeholder="Add area"
+                  editable={!loading}
                 />
-                <TouchableOpacity style={styles.addAreaButton} onPress={handleAddArea}>
+                <TouchableOpacity 
+                  style={styles.addAreaButton} 
+                  onPress={handleAddArea}
+                  disabled={loading}>
                   <Ionicons name="add" size={20} color="#666" />
                   <Text style={styles.addAreaText}>Add</Text>
                 </TouchableOpacity>
@@ -207,7 +248,8 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
                       styles.paymentChip,
                       paymentModes.includes(mode) && styles.paymentChipActive,
                     ]}
-                    onPress={() => togglePaymentMode(mode)}>
+                    onPress={() => togglePaymentMode(mode)}
+                    disabled={loading}>
                     <Text
                       style={[
                         styles.paymentChipText,
@@ -223,7 +265,11 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
             {/* Show in offers */}
             <View style={styles.toggleRow}>
               <Text style={styles.toggleLabel}>Show in offers</Text>
-              <Switch value={showInOffers} onValueChange={setShowInOffers} />
+              <Switch 
+                value={showInOffers} 
+                onValueChange={setShowInOffers}
+                disabled={loading}
+              />
             </View>
 
             {/* Seller note */}
@@ -235,11 +281,19 @@ const AddProductModal: React.FC<AddProductModalProps> = ({
               placeholder="Add a short note for outlets..."
               multiline
               numberOfLines={4}
+              editable={!loading}
             />
 
             {/* Save button */}
-            <TouchableOpacity style={styles.saveButton} onPress={handleSaveProduct}>
-              <Text style={styles.saveButtonText}>Save Product</Text>
+            <TouchableOpacity 
+              style={[styles.saveButton, loading && styles.saveButtonDisabled]} 
+              onPress={handleSaveProduct}
+              disabled={loading}>
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.saveButtonText}>Save Product</Text>
+              )}
             </TouchableOpacity>
 
             <View style={{ height: 20 }} />
@@ -477,6 +531,9 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 8,
     alignItems: 'center',
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
   },
   saveButtonText: {
     color: '#fff',

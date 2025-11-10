@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,24 +6,47 @@ import {
   StyleSheet,
   ScrollView,
   StatusBar,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useNavigation } from '@react-navigation/native';
-import { useOrders } from '../context/OrderContext';
-const OrdersScreen = () => {
+import { getOrders, Order } from '../api/client';
+
+const OrdersScreen = ({ userId = 'USER001' }) => {
   const navigation = useNavigation();
-  const { orders } = useOrders();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedTab, setSelectedTab] = useState<'Pending' | 'Dispatched' | 'Delivered'>('Pending');
 
-  // Map order statuses to user-friendly tabs
-  // 'accepted' → Pending (distributor accepted, preparing order)
-  // 'dispatched' → Dispatched (order on the way)
-  // 'delivered' → Delivered (order received)
+  const loadOrders = async () => {
+    try {
+      setLoading(true);
+      const data = await getOrders(undefined, userId);
+      setOrders(data);
+    } catch (error: any) {
+      console.error('Error loading orders:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadOrders();
+    setRefreshing(false);
+  }, []);
+
+  useEffect(() => {
+    loadOrders();
+  }, []);
+
   const getOrdersByTab = (tab: string) => {
     switch (tab) {
       case 'Pending':
-        return orders.filter(order => order.status === 'accepted');
+        return orders.filter(order => order.status === 'accepted' || order.status === 'pending');
       case 'Dispatched':
         return orders.filter(order => order.status === 'dispatched');
       case 'Delivered':
@@ -58,6 +81,15 @@ const OrdersScreen = () => {
     }
   };
 
+  if (loading && !refreshing) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2563EB" />
+        <Text style={styles.loadingText}>Loading orders...</Text>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="dark-content" backgroundColor="#fff" />
@@ -68,12 +100,14 @@ const OrdersScreen = () => {
           <Ionicons name="arrow-back" size={22} color="#0F172A" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Orders</Text>
-        <TouchableOpacity>
-          <Ionicons name="add" size={26} color="#0F172A" />
-        </TouchableOpacity>
+        <View style={{ width: 26 }} />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }>
         {/* Tabs */}
         <View style={styles.tabs}>
           {['Pending', 'Dispatched', 'Delivered'].map(tab => (
@@ -103,10 +137,10 @@ const OrdersScreen = () => {
               <Text style={styles.emptyText}>No {selectedTab} orders</Text>
               <Text style={styles.emptySubtext}>
                 {selectedTab === 'Pending' 
-                  ? 'Orders will appear here when distributor accepts them'
+                  ? 'Orders will appear here when placed'
                   : selectedTab === 'Dispatched'
                   ? 'Dispatched orders will appear here'
-                  : 'Delivered orders will appear in Past Orders section'}
+                  : 'Delivered orders will appear here'}
               </Text>
             </View>
           ) : (
@@ -114,7 +148,7 @@ const OrdersScreen = () => {
               <View key={order.id} style={styles.card}>
                 <View style={styles.cardHeader}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.company}>{order.distributor_name}</Text>
+                    <Text style={styles.company}>Distributor: {order.distributor_id}</Text>
                     <Text style={styles.productName}>{order.product_name}</Text>
                   </View>
                   <View style={[styles.statusBadge, getStatusColor(selectedTab)]}>
@@ -123,10 +157,13 @@ const OrdersScreen = () => {
                 </View>
 
                 <Text style={styles.details}>
-                  Order ID: #{order.id} • {formatDate(order.created_at)}
+                  Order ID: {order.order_id} • {formatDate(order.created_at)}
                 </Text>
                 <Text style={styles.details}>
-                  {order.quantity} units • ₹{order.total_price?.toLocaleString() || 0}
+                  {order.quantity} units • ₹{order.total_amount?.toLocaleString() || 0}
+                </Text>
+                <Text style={styles.details}>
+                  Payment: {order.payment_mode}
                 </Text>
 
                 {/* Order Progress Indicator */}
@@ -136,15 +173,18 @@ const OrdersScreen = () => {
                       style={[
                         styles.progressFill,
                         { 
-                          width: order.status === 'accepted' ? '33%' 
-                               : order.status === 'dispatched' ? '66%' 
+                          width: order.status === 'pending' ? '25%'
+                               : order.status === 'accepted' ? '50%' 
+                               : order.status === 'dispatched' ? '75%' 
                                : '100%' 
                         }
                       ]} 
                     />
                   </View>
                   <Text style={styles.progressText}>
-                    {order.status === 'accepted' 
+                    {order.status === 'pending' 
+                      ? 'Order placed' 
+                      : order.status === 'accepted' 
                       ? 'Being prepared' 
                       : order.status === 'dispatched' 
                       ? 'On the way' 
@@ -156,7 +196,7 @@ const OrdersScreen = () => {
           )}
         </View>
 
-        {/* Past Orders (Delivered) */}
+        {/* Past Orders Section */}
         {selectedTab !== 'Delivered' && deliveredOrders.length > 0 && (
           <View style={styles.pastOrdersSection}>
             <Text style={styles.sectionTitle}>Past Orders</Text>
@@ -164,7 +204,7 @@ const OrdersScreen = () => {
               <View key={order.id} style={styles.card}>
                 <View style={styles.cardHeader}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.company}>{order.distributor_name}</Text>
+                    <Text style={styles.company}>Distributor: {order.distributor_id}</Text>
                     <Text style={styles.productName}>{order.product_name}</Text>
                   </View>
                   <View style={[styles.statusBadge, styles.badgeDelivered]}>
@@ -173,15 +213,11 @@ const OrdersScreen = () => {
                 </View>
 
                 <Text style={styles.details}>
-                  Order ID: #{order.id} • {formatDate(order.created_at)}
+                  Order ID: {order.order_id} • {formatDate(order.created_at)}
                 </Text>
                 <Text style={styles.details}>
-                  {order.quantity} units • ₹{order.total_price?.toLocaleString() || 0}
+                  {order.quantity} units • ₹{order.total_amount?.toLocaleString() || 0}
                 </Text>
-
-                <TouchableOpacity>
-                  <Text style={styles.invoiceLink}>View invoice</Text>
-                </TouchableOpacity>
               </View>
             ))}
 
@@ -202,41 +238,6 @@ const OrdersScreen = () => {
           </View>
         )}
 
-        {/* Show all delivered orders when on Delivered tab */}
-        {selectedTab === 'Delivered' && deliveredOrders.length > 0 && (
-          <View style={styles.pastOrdersSection}>
-            <Text style={styles.sectionTitle}>All Delivered Orders</Text>
-            {deliveredOrders.map(order => (
-              <View key={order.id} style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.company}>{order.distributor_name}</Text>
-                    <Text style={styles.productName}>{order.product_name}</Text>
-                  </View>
-                  <View style={[styles.statusBadge, styles.badgeDelivered]}>
-                    <Text style={styles.badgeText}>Delivered</Text>
-                  </View>
-                </View>
-
-                <Text style={styles.details}>
-                  Order ID: #{order.id} • {formatDate(order.created_at)}
-                </Text>
-                <Text style={styles.details}>
-                  {order.quantity} units • ₹{order.total_price?.toLocaleString() || 0}
-                </Text>
-
-                <TouchableOpacity>
-                  <Text style={styles.invoiceLink}>View invoice</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-
-            <Text style={styles.noteText}>
-              All items from delivered orders have been added to your stock.
-            </Text>
-          </View>
-        )}
-
         <View style={{ height: 20 }} />
       </ScrollView>
     </SafeAreaView>
@@ -246,9 +247,20 @@ const OrdersScreen = () => {
 export default OrdersScreen;
 
 const styles = StyleSheet.create({
- safe: {
+  safe: {
     flex: 1,
     backgroundColor: '#F9FAFB',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666',
   },
   header: {
     flexDirection: 'row',
@@ -374,12 +386,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
     marginTop: 6,
-  },
-  invoiceLink: {
-    color: '#2563EB',
-    fontWeight: '600',
-    fontSize: 14,
-    marginTop: 8,
   },
   sectionTitle: {
     fontSize: 16,
