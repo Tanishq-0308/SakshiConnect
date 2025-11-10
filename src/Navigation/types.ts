@@ -1,0 +1,30 @@
+export type MainStackParamList = {
+    RoleSelectionPage: undefined;
+    UserRegisterPage: undefined;
+    AdminRegisterPage: undefined;
+    DistributorRegisterPage: undefined;
+    LoginPage: undefined;
+    HomeScreen: undefined;
+    BottomTabs: undefined;
+    MenstrualCup: undefined;
+    PeriodPanties: undefined;
+    ReusablePads: undefined;
+    StarterKit: undefined;
+    InventoryScreen: undefined;
+    OdersScreen: undefined;
+    BusinessDetailsScreen: undefined;
+    OrdersPage: undefined;
+    DistibuterHome: undefined;
+    CreateOrder: undefined;
+    ManageOrder: undefined;
+    CreateOrderPage: undefined;
+    AddProductScreen: undefined;
+    ShgScreen: undefined;
+    CreateProductModal: undefined;
+    AddProductModalProps: undefined;
+    PlaceOrderScreen : undefined;
+    OffersScreen : undefined;
+    PharmacistScreen : undefined;
+    StockManagePage: undefined;
+    DistProfileScreen:undefined;
+}
