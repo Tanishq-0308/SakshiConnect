@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { MainStackParamList } from '../../Navigation/types';
+import ApiConfigScreen from '../../config/ApiConfig';
 
 type NavigationType = NativeStackNavigationProp<MainStackParamList>;
 
@@ -174,9 +175,15 @@ const ProfileScreen = () => {
           <Ionicons name="logo-whatsapp" size={18} color="#22C55E" />
           <Text style={styles.supportText}>WhatsApp support</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.supportBtn}
+          onPress={() => navigation.navigate('ApiConfigScreen')}>
+          <Ionicons name="settings-outline" size={24} color="#000" />
+          <Text style={styles.supportText}>API Settings</Text>
+        </TouchableOpacity>
 
         {/* Logout */}
-        <TouchableOpacity style={styles.logoutBtn} onPress={()=>navigation.navigate('LoginPage')}>
+        <TouchableOpacity style={styles.logoutBtn} onPress={() => navigation.navigate('LoginPage')}>
           <Ionicons name="log-out-outline" size={20} color="#DC2626" />
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>

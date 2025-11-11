@@ -1,5 +1,16 @@
 // src/api/client.ts
-const API_BASE_URL = 'http://192.168.1.42:8000'; // Replace with YOUR laptop IP
+import { getApiUrl } from "../config/ApiConfig";
+// const API_BASE_URL = 'http://192.168.1.42:8000'; // Replace with YOUR laptop IP
+
+let cachedBaseUrl: string | null = null;
+
+const getBaseUrl = async (): Promise<string> => {
+  if (!cachedBaseUrl) {
+    cachedBaseUrl = await getApiUrl();
+  }
+  return cachedBaseUrl;
+};
+
 
 export interface Product {
   id: number;
@@ -59,6 +70,7 @@ export const addProductToInventory = async (product: {
   is_enabled: boolean;
   image_url?: string;
 }): Promise<Product> => {
+  const API_BASE_URL = await getBaseUrl();
   const response = await fetch(`${API_BASE_URL}/api/inventory/add`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -76,6 +88,7 @@ export const getInventory = async (
   distributorId?: string,
   enabledOnly: boolean = false
 ): Promise<Product[]> => {
+  const API_BASE_URL = await getBaseUrl();
   let url = `${API_BASE_URL}/api/inventory?`;
   if (distributorId) url += `distributor_id=${distributorId}&`;
   if (enabledOnly) url += `enabled_only=true`;
@@ -93,6 +106,7 @@ export const updateProduct = async (
   productId: number,
   updates: Partial<Product>
 ): Promise<Product> => {
+  const API_BASE_URL = await getBaseUrl();
   const response = await fetch(`${API_BASE_URL}/api/inventory/${productId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -107,6 +121,7 @@ export const updateProduct = async (
 };
 
 export const deleteProduct = async (productId: number): Promise<void> => {
+  const API_BASE_URL = await getBaseUrl();
   const response = await fetch(`${API_BASE_URL}/api/inventory/${productId}`, {
     method: 'DELETE',
   });
@@ -130,6 +145,7 @@ export const createOrder = async (order: {
   payment_mode: string;
   delivery_address: string;
 }): Promise<Order> => {
+  const API_BASE_URL = await getBaseUrl();
   const response = await fetch(`${API_BASE_URL}/api/orders/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -149,6 +165,7 @@ export const getOrders = async (
   userId?: string,
   status?: string
 ): Promise<Order[]> => {
+  const API_BASE_URL = await getBaseUrl();
   let url = `${API_BASE_URL}/api/orders?`;
   if (distributorId) url += `distributor_id=${distributorId}&`;
   if (userId) url += `user_id=${userId}&`;
@@ -164,6 +181,7 @@ export const getOrders = async (
 };
 
 export const acceptOrder = async (orderId: string): Promise<Order> => {
+  const API_BASE_URL = await getBaseUrl();
   const response = await fetch(`${API_BASE_URL}/api/orders/${orderId}/accept`, {
     method: 'PUT',
   });
@@ -176,6 +194,7 @@ export const acceptOrder = async (orderId: string): Promise<Order> => {
 };
 
 export const dispatchOrder = async (orderId: string): Promise<Order> => {
+  const API_BASE_URL = await getBaseUrl();
   const response = await fetch(`${API_BASE_URL}/api/orders/${orderId}/dispatch`, {
     method: 'PUT',
   });
@@ -188,6 +207,7 @@ export const dispatchOrder = async (orderId: string): Promise<Order> => {
 };
 
 export const deliverOrder = async (orderId: string): Promise<Order> => {
+  const API_BASE_URL = await getBaseUrl();
   const response = await fetch(`${API_BASE_URL}/api/orders/${orderId}/deliver`, {
     method: 'PUT',
   });
@@ -204,6 +224,7 @@ export const deliverOrder = async (orderId: string): Promise<Order> => {
 // ============================================
 
 export const getUserStock = async (userId: string): Promise<Stock[]> => {
+  const API_BASE_URL = await getBaseUrl();
   const response = await fetch(`${API_BASE_URL}/api/stock?user_id=${userId}`);
   
   if (!response.ok) {
@@ -217,6 +238,7 @@ export const updateStock = async (
   stockId: number,
   quantity: number
 ): Promise<Stock> => {
+  const API_BASE_URL = await getBaseUrl();
   const response = await fetch(`${API_BASE_URL}/api/stock/${stockId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

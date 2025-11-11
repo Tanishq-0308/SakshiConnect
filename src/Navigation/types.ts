@@ -27,4 +27,5 @@ export type MainStackParamList = {
     PharmacistScreen : undefined;
     StockManagePage: undefined;
     DistProfileScreen:undefined;
+    ApiConfigScreen:undefined;
 }
